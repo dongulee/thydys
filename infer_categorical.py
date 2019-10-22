@@ -36,13 +36,12 @@ def main():
     timesteps = options.timesteps
     num_input = options.num_input
     #ckpt_dir = options.ckpt_dir
+    len_status = 3
 
     X = np.fromfile(input_dir + '/X.dat', dtype=float)
-    cardinality = int(X.shape[0]/(timesteps * num_input))
-    X = X.reshape([cardinality, timesteps, num_input])
+    cardinality = int(X.shape[0]/(timesteps * num_input + len_status+1))
+    X = X.reshape([cardinality, timesteps*num_input + len_status+1])
     Y = np.fromfile(input_dir + '/Y.dat', dtype=float)
-    
-
     train_x, val_x, test_x, train_y, val_y, test_y = utl.train_val_test_split(X, Y, split_frac=0.80)
      
     # Training Parameters
@@ -54,7 +53,7 @@ def main():
     # Network Parameters
     #num_input = 2 
     #timesteps = 480 
-    num_hidden = 2048 
+    num_hidden = 4096 
     num_classes = 1
    
     print("### Network Parameters ###")
@@ -64,16 +63,21 @@ def main():
     print("Timestep: {}".format(timesteps)) 
     print("------------------")
     X_ = tf.placeholder("float", [None, timesteps, num_input])
+    X_status = tf.placeholder("float", [None, len_status])
     Y_ = tf.placeholder("float", [None, num_classes])
     lr = tf.placeholder("float")
     
     weights = {
         'out':tf.Variable(tf.random_normal([num_hidden,num_classes])),
+        'status':tf.Variable(tf.random_normal([len_status, num_classes]))
     }
     biases = {
         'out':tf.Variable(tf.random_normal([num_classes]))
     }
-    prediction = RNN(X_, weights, biases, timesteps, num_hidden)
+    seq_embed = RNN(X_, weights, biases, timesteps, num_hidden)
+    prediction = seq_embed + tf.matmul(X_status, weights['status']) 
+    #prediction = seq_embed + tf.matmul(X_status, weights['status'][:2]) 
+    #prediction = seq_embed
     
     loss_op = tf.losses.mean_squared_error(Y_, prediction)
     #optimizer = tf.train.AdadeltaOptimizer(lr).minimize(loss_op)
@@ -94,26 +98,28 @@ def main():
 
     with tf.Session() as sess:
         #new_saver = tf.train.import_meta_graph('ckpt.meta')
-        saver.restore(sess, ckpt.model_checkpoint_path) 
-        test_norm = utl.minmax_norm(test_x)
-        print("loss test: %f" % loss_op.eval(feed_dict = {X_:test_norm, Y_:test_y[:, None]}))
-
-        X_norm = utl.minmax_norm(X)
-        pred = np.array(prediction.eval(feed_dict = {X_:X_norm, Y_:Y[:, None]}))
+        saver.restore(sess, ckpt.model_checkpoint_path)
+        print("weight of status varible")
+        print( weights['status'].eval())
+        x_seq = X[:, :timesteps*num_input]
+        x_status = X[:, timesteps*num_input:timesteps*num_input+len_status]
+        x_status = utl.norm_status(x_status, [0,1])
+        x_seq = x_seq.reshape((-1, timesteps, num_input))
+        pred = np.array(prediction.eval(feed_dict = {X_:x_seq, X_status:x_status, Y_:Y[:, None]}))
         
         pred_diagnosis = [1 if x[0]>=1.8 else 0 for x in list(pred)]
         y_diagnosis = [1 if x>=1.8 else 0 for x in list(Y)]
         evaluation = np.equal(pred_diagnosis, y_diagnosis)
+        print("accuracy")
         print(np.mean(evaluation))
-        f = open(SAVER_DIR + '/result.txt', 'w')
+        f = open(SAVER_DIR+'/result.txt', 'w')
         for i in range(0, len(Y)):
             f.write(str(pred[i][0]) + ', ' + str(Y[i])+'\n')
-        f2 = open(SAVER_DIR + '/result_diagnosis.txt', 'w')
+        f2 = open(SAVER_DIR+'/result_diagnosis.txt', 'w')
         for i in range(0, len(Y)):
             f2.write(str(pred_diagnosis[i]) + ', ' + str(y_diagnosis[i])+'\n')
         f2.close()
         f.close()
-
 #        sess.close()
 
 

@@ -12,21 +12,21 @@
 
 ## Data preparation
 
-    ```bash
-    python prep_data.py -t raw -d data -s 15T --duration 10 -o data/10D15m
+```bash
+python prep_data.py -t raw -d data -s 15T --duration 10 -o data/10D15m
 
-    ```
+```
 
 
 ## Train
 
-    ```bash
-    python train.py --input-dir=data/10D15m --timesteps=960 --num-input=2 -o ./model_10D_1
+```bash
+python train.py --input-dir=data/10D15m --timesteps=960 --num-input=2 -o ./ckpt/model_10D_1/train1
 
-    ```
+```
 
 ## Infer
 
-    ```bash
-    python train.py --input-dir=data/10D15m --timesteps=960 --num-input=2 -o ./model_10D_1
-    ```
+```bash
+python train.py --input-dir=data/10D15m --timesteps=960 --num-input=2 -c ./ckpt/model_10D_1
+```

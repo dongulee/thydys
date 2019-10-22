@@ -1,12 +1,21 @@
-
 # coding: utf-8
 
+'''
 # # Training of Thyroid dysfunction prediction model w/ LSTM network
 # 
 # * Using pre-processed data from dat files (X.dat, Y.dat)
-# * 
+data description
+X: 
+- sequence of HR and acitvity
+- categorical data
+  + age
+  + gender
+  + Ht (height)
 
-# In[1]:
+Y:
+- free T4
+
+'''
 
 
 from os import listdir
@@ -16,7 +25,6 @@ import numpy as np
 import subprocess
 import tensorflow as tf
 import utils as utl
-from sklearn.preprocessing import minmax_scale
 #from collections import Counter
 
 import sys
@@ -34,7 +42,8 @@ def RNN(x, weights, biases, timesteps, num_hidden):
     outputs, states = tf.contrib.rnn.static_rnn(lstm_cell, x, dtype=tf.float32)
 
     # Linear activation, using rnn inner loop last output
-    return tf.matmul(outputs[-1], weights['out']) + biases['out']
+    # Y (freeT4) = W_x * o_T (final output from LSTM) + W_status * S + biases
+    return tf.matmul(outputs[-1], weights['out']) +  biases['out']
 
 def eval_thydys(x):
     return np.array(list(tf.map_fn(lambda x: 1 if x>=1.8 else 0,x)))
@@ -57,10 +66,11 @@ def main():
     timesteps = options.timesteps
     num_input = options.num_input
     ckpt_dir = options.ckpt_dir
-   
+    len_status = 3
+
     X = np.fromfile(input_dir + '/X.dat', dtype=float)
-    cardinality = int(X.shape[0]/(timesteps * num_input))
-    X = X.reshape([cardinality, timesteps*num_input])
+    cardinality = int(X.shape[0]/(timesteps * num_input + len_status+1))
+    X = X.reshape([cardinality, timesteps*num_input + len_status+1])
     Y = np.fromfile(input_dir + '/Y.dat', dtype=float)
     train_x, val_x, test_x, train_y, val_y, test_y = utl.train_val_test_split(X, Y, split_frac=0.80)
     #print("Data Set Size")
@@ -73,15 +83,15 @@ def main():
     
     
     # Training Parameters
-    learning_rate = 0.0015
-    epochs = 200 
-    batch_size = 40
+    learning_rate = 0.001
+    epochs =500 
+    batch_size = 60
     #display_step = 200
     
     # Network Parameters
     #num_input = 2 
     #timesteps = 480 
-    num_hidden =2048 
+    num_hidden = 4096
     num_classes = 1
    
     print("### Network Parameters ###")
@@ -91,16 +101,20 @@ def main():
     print("Timestep: {}".format(timesteps)) 
     print("------------------")
     X_ = tf.placeholder("float", [None, timesteps, num_input])
+    X_status = tf.placeholder("float", [None, len_status])
+
     Y_ = tf.placeholder("float", [None, num_classes])
     lr = tf.placeholder("float")
     
     weights = {
-        'out':tf.Variable(tf.random_normal([num_hidden,num_classes]))
+        'out':tf.Variable(tf.random_normal([num_hidden,num_classes])),
+        'status': tf.Variable(tf.random_normal([len_status,num_classes]))
     }
     biases = {
         'out':tf.Variable(tf.random_normal([num_classes]))
     }
-    prediction = RNN(X_, weights, biases, timesteps, num_hidden)
+    seq_embed = RNN(X_, weights, biases, timesteps, num_hidden)
+    prediction = seq_embed + tf.matmul(X_status, weights['status']) 
     
     loss_op = tf.losses.mean_squared_error(Y_, prediction)
     #optimizer = tf.train.AdadeltaOptimizer(lr).minimize(loss_op)
@@ -121,23 +135,28 @@ def main():
         n_batches = len(train_x)//batch_size
         
         for e in range(epochs):
-            if epochs%30==0:
-                learning_rate = learning_rate*0.95
+            if (epochs%30 == 0):
+                learning_rate = learning_rate*0.98
             train_acc = []
             for ii, (x, y) in enumerate(utl.get_batches(train_x, train_y, batch_size), 1):
-                x = x.reshape((batch_size, timesteps, num_input))
-                x_norm = utl.minmax_norm(x)
-
-                feed = {X_: x_norm, Y_: y[:, None], lr:learning_rate}
+                x_seq = x[:, :timesteps*num_input]
+                x_status = x[:, timesteps*num_input:timesteps*num_input+len_status]
+                x_status = utl.norm_status(x_status, [0,1])
+                x_seq = x_seq.reshape((batch_size, timesteps, num_input))
+           
+                feed = {X_: x_seq, Y_: y[:, None], X_status: x_status, lr:learning_rate}
                 loss, acc, _ = sess.run([loss_op, accuracy, optimizer], feed_dict=feed)
                 train_acc.append(acc)
     
                 if (ii+1) % n_batches == 0:
                     val_acc = []
                     for xx, yy in utl.get_batches(val_x, val_y, batch_size):
-                        xx = xx.reshape((batch_size, timesteps, num_input))
-                        xx_norm = utl.minmax_norm(xx)
-                        feed = {X_:xx_norm,Y_:yy[:,None], lr:learning_rate}
+                        xx_seq = xx[:, :timesteps*num_input]
+                        xx_status = xx[:, timesteps*num_input:timesteps*num_input+len_status]
+                        xx_status = utl.norm_status(xx_status, [0,1])
+                        xx_seq = xx_seq.reshape((batch_size, timesteps, num_input))
+
+                        feed = {X_:xx_seq, Y_:yy[:,None], X_status:xx_status, lr:learning_rate}
                         val_batch_loss = sess.run([loss_op], feed_dict=feed)
                         val_acc.append(val_batch_loss)
     
@@ -147,10 +166,13 @@ def main():
                           #"Train Accruacy: {:.3f}...".format(np.mean(train_acc)),
                           "Val Loss: {:.3f}".format(np.mean(val_acc)))
         
-        test_data = test_x.reshape((-1, timesteps, num_input))
-        test_norm = utl.minmax_norm(test_data)
+        test_data = test_x.reshape((-1, timesteps*num_input+len_status+1))
+        test_x = test_data[:, :timesteps*num_input]
+        test_xs = test_data[:, timesteps*num_input:timesteps*num_input+len_status]
+        test_xs = utl.norm_status(test_xs, [0,1])
+        test_x = test_x.reshape((-1, timesteps, num_input))
         test_label = test_y
-        print("Testing Loss:", sess.run(loss_op, feed_dict={X_: test_norm, Y_: test_label[:, None], lr:learning_rate}))
+        print("Testing Loss:", sess.run(loss_op, feed_dict={X_: test_x, Y_: test_label[:, None], X_status: test_xs, lr:learning_rate}))
         
         # Model Checkpoint
         saver.save(sess, ckpt_dir) 

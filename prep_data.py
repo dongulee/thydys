@@ -134,7 +134,7 @@ class hr_data:
 
 def main():
     if (len(sys.argv) <= 1):
-        print ("memopad.py -h or --help to get guideline of input options")
+        print ("prep_data.py -h or --help to get guideline of input options")
         exit()
         
     use = "Usage: %prog [options] filename"

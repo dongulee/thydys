@@ -16,7 +16,6 @@ import numpy as np
 import subprocess
 import tensorflow as tf
 import utils as utl
-from sklearn.preprocessing import minmax_scale
 #from collections import Counter
 
 import sys
@@ -41,6 +40,7 @@ def eval_thydys(x):
 
 
 def main():
+    ''' 
     # Option Parser
     if (len(sys.argv) <= 1):
         print("train.py -h or --help to get guideline of input options")
@@ -57,7 +57,14 @@ def main():
     timesteps = options.timesteps
     num_input = options.num_input
     ckpt_dir = options.ckpt_dir
-   
+    '''
+    
+    input_dir = '/home/dklee/notebook/thydys/data/15T'
+    timesteps = 480
+    num_input = 2
+    ckpt_dir = '/home/dklee/notebook/thydys/tmp'
+
+
     X = np.fromfile(input_dir + '/X.dat', dtype=float)
     cardinality = int(X.shape[0]/(timesteps * num_input))
     X = X.reshape([cardinality, timesteps*num_input])
@@ -73,8 +80,8 @@ def main():
     
     
     # Training Parameters
-    learning_rate = 0.0015
-    epochs = 200 
+    learning_rate = 0.001
+    epochs =800 
     batch_size = 40
     #display_step = 200
     
@@ -126,9 +133,7 @@ def main():
             train_acc = []
             for ii, (x, y) in enumerate(utl.get_batches(train_x, train_y, batch_size), 1):
                 x = x.reshape((batch_size, timesteps, num_input))
-                x_norm = utl.minmax_norm(x)
-
-                feed = {X_: x_norm, Y_: y[:, None], lr:learning_rate}
+                feed = {X_: x, Y_: y[:, None], lr:learning_rate}
                 loss, acc, _ = sess.run([loss_op, accuracy, optimizer], feed_dict=feed)
                 train_acc.append(acc)
     
@@ -136,8 +141,7 @@ def main():
                     val_acc = []
                     for xx, yy in utl.get_batches(val_x, val_y, batch_size):
                         xx = xx.reshape((batch_size, timesteps, num_input))
-                        xx_norm = utl.minmax_norm(xx)
-                        feed = {X_:xx_norm,Y_:yy[:,None], lr:learning_rate}
+                        feed = {X_:xx,Y_:yy[:,None], lr:learning_rate}
                         val_batch_loss = sess.run([loss_op], feed_dict=feed)
                         val_acc.append(val_batch_loss)
     
@@ -148,9 +152,8 @@ def main():
                           "Val Loss: {:.3f}".format(np.mean(val_acc)))
         
         test_data = test_x.reshape((-1, timesteps, num_input))
-        test_norm = utl.minmax_norm(test_data)
         test_label = test_y
-        print("Testing Loss:", sess.run(loss_op, feed_dict={X_: test_norm, Y_: test_label[:, None], lr:learning_rate}))
+        print("Testing Loss:", sess.run(loss_op, feed_dict={X_: test_data, Y_: test_label[:, None], lr:learning_rate}))
         
         # Model Checkpoint
         saver.save(sess, ckpt_dir) 
